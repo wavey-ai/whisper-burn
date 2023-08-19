@@ -12,7 +12,7 @@ burn-tch = { package = "burn-tch", git = "https://github.com/burn-rs/burn.git" }
 serde = {version = "1.0.171", features = ["std", "derive"]}
 num-traits = "0.2.15"
 hound = "3.5.0"
-tokenizers = {version = "0.13.3", default-features = false, features = [
+tokenizers = {version = "0.13.4", default-features = false, features = [
   "onig",
   "http",
 ]}
