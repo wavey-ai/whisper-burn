@@ -11,6 +11,7 @@ use burn::{
     tensor::{
         self, 
         backend::{self, Backend},
+        Shape,
         Data, 
         Tensor,
         Int, 
@@ -51,6 +52,54 @@ pub fn waveform_to_text<B: Backend>(whisper: &Whisper<B>, bpe: &Gpt2Tokenizer, w
     }
 
     Ok( (text, tokens) )
+}
+
+
+// Transcribe a pre-computed mel spectrogram interleaved in row-major order
+pub fn spectrogram_to_text<B: Backend>(
+    whisper: &Whisper<B>,
+    bpe: &Gpt2Tokenizer,
+    data: &Vec<f32>,
+) -> token::Result<(String, Vec<usize>)> {
+    let device = whisper.devices()[0].clone();
+
+    let padding = 10;
+    let n_mels = 80;
+    let n_frames = data.len() / n_mels;
+    let shape = Shape::new([1, n_mels, n_frames]);
+    let data_tensor = convert_floats_to_tensor(data);
+    let mel = data_tensor.reshape(shape).to_device(&device);
+    let mut text = String::new();
+    let mut tokens: Vec<usize> = Vec::new();
+
+    let mut prev_normal_tokens: Vec<_> = tokens
+        .iter()
+        .rev()
+        .filter(|&&t| !bpe.is_special(t))
+        .cloned()
+        .take(5)
+        .collect();
+    prev_normal_tokens.reverse();
+
+    let (new_text, new_tokens) = mels_to_text(whisper, bpe, mel, &prev_normal_tokens[..], padding)?;
+
+    if let Some((prev_index, curr_index)) = find_chunk_overlap(&tokens[..], &new_tokens[..], 40, 3)
+    {
+        tokens.truncate(prev_index);
+        tokens.extend(&new_tokens[curr_index..]);
+    } else {
+        tokens.extend(new_tokens);
+    }
+
+    text = bpe.decode(&tokens[..], true)?;
+
+    Ok((text, tokens))
+}
+
+fn convert_floats_to_tensor<B: Backend>(floats: &Vec<f32>) -> Tensor<B, 1> {
+    let shape: [usize; 1] = [floats.len()];
+    let tensor = Tensor::from_floats(Data::new(floats.clone(), [floats.len()].into()));
+    tensor.reshape(shape)
 }
 
 fn find_chunk_overlap(prev_tokens: &[usize], curr_tokens: &[usize], max_n_offsets: usize, min_n_overlaps: usize) -> Option<(usize, usize)> {
